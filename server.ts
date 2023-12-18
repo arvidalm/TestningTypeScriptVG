@@ -1,50 +1,100 @@
-import express, { json } from 'express';
+import express, { json, Request, Response } from 'express';
+import mongoose, { Document, Schema, Model } from 'mongoose';
 import axios from 'axios';
-
-import mongoose from 'mongoose';
+import { validateEmail, validateZipCode, validatePersonalNumber, validateText } from './validation';
 
 const app = express();
 
 app.use(json());
 
-type IExercise = {
-    startTime: Date,
-    durationInSeconds: Number,
-    activityType: "running" | "walking" | "biking"
+interface IContact extends Document {
+    firstname: string;
+    lastname: string;
+    email: string;
+    personalnumber: string;
+    address: string;
+    zipCode: string;
+    city: string;
+    country: string;
+    lat?: number;
+    lng?: number;
 }
 
-const exerciseSchema = new mongoose.Schema<IExercise>({
-    startTime: Date,
-    durationInSeconds: Number,
-    activityType: String
+const contactSchema = new Schema<IContact>({
+    firstname: { type: String, required: true, validate: { validator: validateText, message: 'Invalid firstname' } },
+    lastname: { type: String, required: true, validate: { validator: validateText, message: 'Invalid lastname' } },
+    email: { type: String, required: true, validate: { validator: validateEmail, message: 'Invalid email' } },
+    personalnumber: { type: String, required: true, validate: { validator: validatePersonalNumber, message: 'Invalid personal number' } },
+    address: { type: String, required: true, validate: { validator: validateText, message: 'Invalid address' } },
+    zipCode: { type: String, required: true, validate: { validator: validateZipCode, message: 'Invalid zip code' } },
+    city: { type: String, required: true, validate: { validator: validateText, message: 'Invalid city' } },
+    country: { type: String, required: true, validate: { validator: validateText, message: 'Invalid country' } },
+    lat: Number,
+    lng: Number,
 });
 
-const ExerciseModel = mongoose.model("exercise", exerciseSchema);
+const ContactModel: Model<IContact> = mongoose.model<IContact>("contact", contactSchema);
 
-app.post('/exercise', async (req, res) => {
-    const exercise = new ExerciseModel(req.body);
-    res.json(await exercise.save());
+app.post('/contact', async (req: Request, res: Response) => {
+    const { firstname, lastname, email, personalnumber, address, zipCode, city, country } = req.body;
+
+    try {
+        // Validera inkommande data innan du skapar en kontakt
+        if (!validateText(firstname) || !validateText(lastname) || !validateText(address) || !validateText(city) || !validateText(country)) {
+            return res.status(400).json({ error: 'Invalid input data' });
+        }
+
+        if (!validateEmail(email)) {
+            return res.status(400).json({ error: 'Invalid email format' });
+        }
+
+        if (!validateZipCode(zipCode)) {
+            return res.status(400).json({ error: 'Invalid zip code format' });
+        }
+
+        if (!validatePersonalNumber(personalnumber)) {
+            return res.status(400).json({ error: 'Invalid personal number format' });
+        }
+
+        const contact = new ContactModel({ firstname, lastname, email, personalnumber, address, zipCode, city, country });
+        const savedContact = await contact.save();
+        res.status(201).json(savedContact);
+    } catch (error: any) {
+        res.status(400).json({ error: error.message });
+    }
 });
 
-app.get('/exercise', async (req, res) => {
-    res.json(await ExerciseModel.find({}));
+app.get('/contact', async (_req: Request, res: Response) => {
+    try {
+        const contacts = await ContactModel.find({});
+        res.status(200).json(contacts);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
-app.get('/exercise/:id', async (req, res) => {
-    const exercise = await ExerciseModel.findById(req.params.id);
+app.get('/contact/:id', async (req: Request, res: Response) => {
+    try {
+        const contact = await ContactModel.findById(req.params.id);
 
-    if (!exercise) {
-        res.status(404).send();
-    } else {
-        const weatherAPI = await axios.get('https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&start_date=2022-06-08&end_date=2022-06-08&daily=temperature_2m_max&timezone=GMT')
-        res.json({ startTime: exercise.startTime, durationInSeconds: exercise.durationInSeconds, activityType: exercise.activityType, temperature: weatherAPI.data.daily.temperature_2m_max[0] });
+        if (!contact) {
+            res.status(404).send();
+        } else {
+            const coordinatesAPI = await axios.get('https://api-ninjas.com/api/geocoding');
+            contact.lat = coordinatesAPI.data.lat;
+            contact.lng = coordinatesAPI.data.lng;
+
+            res.status(200).json(contact);
+        }
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
     }
 });
 
 const port = process.env.PORT || 8080;
 
-mongoose.connect("mongodb://localhost:27017/myapp").then(() => {
+mongoose.connect("mongodb://localhost:27017/contactapp").then(() => {
     app.listen(port, () => {
-        console.log(`App listening to port ${port}`)
-    })
-})
+        console.log(`App listening to port ${port}`);
+    });
+}).catch(err => console.error(err));
