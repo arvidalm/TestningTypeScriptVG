@@ -1,10 +1,10 @@
 import express, { json, Request, Response } from 'express';
 import mongoose, { Document, Schema, Model } from 'mongoose';
+mongoose.set('strictQuery', false);
 import axios from 'axios';
 import { validateEmail, validateZipCode, validatePersonalNumber, validateText } from './validation';
 
 const app = express();
-
 app.use(json());
 
 interface IContact extends Document {
@@ -33,13 +33,13 @@ const contactSchema = new Schema<IContact>({
     lng: Number,
 });
 
-const ContactModel: Model<IContact> = mongoose.model<IContact>("contact", contactSchema);
+export const ContactModel: Model<IContact> = mongoose.model<IContact>("contact", contactSchema);
+
 
 app.post('/contact', async (req: Request, res: Response) => {
     const { firstname, lastname, email, personalnumber, address, zipCode, city, country } = req.body;
 
     try {
-        // Validera inkommande data innan du skapar en kontakt
         if (!validateText(firstname) || !validateText(lastname) || !validateText(address) || !validateText(city) || !validateText(country)) {
             return res.status(400).json({ error: 'Invalid input data' });
         }
@@ -78,14 +78,15 @@ app.get('/contact/:id', async (req: Request, res: Response) => {
         const contact = await ContactModel.findById(req.params.id);
 
         if (!contact) {
-            res.status(404).send();
-        } else {
-            const coordinatesAPI = await axios.get('https://api-ninjas.com/api/geocoding');
-            contact.lat = coordinatesAPI.data.lat;
-            contact.lng = coordinatesAPI.data.lng;
-
-            res.status(200).json(contact);
+            return res.status(404).send();
         }
+
+        const address = encodeURIComponent(`${contact.address}, ${contact.city}, ${contact.country}`);
+        const coordinatesAPI = await axios.get(`https://api-ninjas.com/api/geocoding?address=${address}`);
+        contact.lat = coordinatesAPI.data.lat;
+        contact.lng = coordinatesAPI.data.lng;
+
+        res.status(200).json(contact);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
@@ -98,3 +99,6 @@ mongoose.connect("mongodb+srv://Nguesseu:vegetadbz@planetvegeta.pbw070j.mongodb.
         console.log(`App listening to port ${port}`);
     });
 }).catch(err => console.error(err));
+
+
+export default app;
